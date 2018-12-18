@@ -46,7 +46,7 @@ parser.add_argument('--load_model', default = None)
 parser.add_argument('--save_dir', default = 'model/')
 args = parser.parse_args()
 
-train_path = 'data/training_label.txt'
+train_path = 'data/labeledTrainData.tsv'
 test_path = 'data/testing_data.txt'
 semi_path = 'data/training_nolabel.txt'
 

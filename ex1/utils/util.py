@@ -5,6 +5,8 @@ from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 from keras.utils import to_categorical
 import _pickle as pk
+import re
+from functools import reduce
 
 #词嵌套word embedding
 class DataManager:
@@ -19,13 +21,15 @@ class DataManager:
         with open(data_path,'r') as f:
             for line in f:
                 if with_label:
-                    lines = line.strip().split().lower()
-                    X.append(lines[2])
+                    lines = line.strip().split('\t')
+                    if lines[0] == 'id':
+                        continue
+                    item = re.findall(r'\b[a-z0-9\']+\b', lines[2], flags=re.IGNORECASE)
+                    X.append(' '.join(item).lower())
                     Y.append(int(lines[1]))
-                    ID.append(line[2])
+                    ID.append(lines[0])
                 else:
                     X.append(line)
-
         if with_label:
             self.data[name] = [X,Y]
         else:
@@ -41,7 +45,8 @@ class DataManager:
             print ('tokenizing %s'%key)
             texts = self.data[key][0]
             self.tokenizer.fit_on_texts(texts)
-        
+        self.index_words = dict(zip(self.tokenizer.word_index.values(),self.tokenizer.word_index.keys()))
+        print('====',self.index_words)
     # Save tokenizer to specified path
     def save_tokenizer(self, path):
         print ('save tokenizer to %s'%path)
@@ -61,7 +66,6 @@ class DataManager:
             print ('Converting %s to sequences'%key)
             tmp = self.tokenizer.texts_to_sequences(self.data[key][0])
             self.data[key][0] = np.array(pad_sequences(tmp, maxlen=maxlen))
-    
     # Convert texts in data to BOW feature
     def to_bow(self):
         for key in self.data:
@@ -73,9 +77,15 @@ class DataManager:
         for key in self.data:
             if len(self.data[key]) == 2:
                 self.data[key][1] = np.array(to_categorical(self.data[key][1]))
+    
+    def to_words(self):
+            for key in self.data:
+                print ('Converting %s sequence to words'%key)
+                for seq in self.data[key][0]:
+                    print(reduce(lambda x,y: x + ' ' + y,map(lambda x: '' if x==0 else self.index_words[x] , seq)))
 
 #半监督学习
-    def get_semi_data(self,name,label,threshold,loss_function) : 
+    def get_semi_data(self,name,label,threshold,loss_function) :
         # if th==0.3, will pick label>0.7 and label<0.3
         label = np.squeeze(label)
         index = (label>1-threshold) + (label<threshold)
