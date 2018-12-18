@@ -3,16 +3,21 @@ import keras
 import _pickle as pk
 import readline
 import numpy as np
+import pandas as pd
 
 from keras import regularizers
 from keras.models import Model
 from keras.layers import Input, GRU, LSTM, Dense, Dropout, Bidirectional
 from keras.layers.embeddings import Embedding
 from keras.optimizers import Adam
-from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.callbacks import EarlyStopping, ModelCheckpoint,Callback
+from keras.utils import plot_model
 
 import keras.backend.tensorflow_backend as K
 import tensorflow as tf
+
+import matplotlib.pyplot as plt
+import zipfile
 
 from utils.util import DataManager
 
@@ -26,8 +31,8 @@ parser.add_argument('--batch_size', default=128, type=float)
 parser.add_argument('--nb_epoch', default=20, type=int)
 parser.add_argument('--val_ratio', default=0.1, type=float)
 parser.add_argument('--gpu_fraction', default=0.3, type=float)
-parser.add_argument('--vocab_size', default=20000, type=int)
-parser.add_argument('--max_length', default=40,type=int)
+parser.add_argument('--vocab_size', default=4000, type=int)
+parser.add_argument('--max_length', default=200,type=int)
 
 # model parameter
 parser.add_argument('--loss_function', default='binary_crossentropy')
@@ -47,8 +52,8 @@ parser.add_argument('--save_dir', default = 'model/')
 args = parser.parse_args()
 
 train_path = 'data/labeledTrainData.tsv'
-test_path = 'data/testing_data.txt'
-semi_path = 'data/training_nolabel.txt'
+test_path = 'data/testData.tsv'
+semi_path = 'data/unlabeledTrainData.tsv'
 
 #建立RNN模型
 # build model
@@ -82,6 +87,8 @@ def simpleRNN(args):
         
     model =  Model(inputs=inputs,outputs=outputs)
 
+    plot_model(model, to_file='model.png')
+
     # optimizer
     adam = Adam()
     print ('compile model...')
@@ -91,6 +98,44 @@ def simpleRNN(args):
     
     return model
 
+#写一个LossHistory类，保存loss和acc
+class LossHistory(keras.callbacks.Callback):
+    def on_train_begin(self, logs={}):
+        self.losses = {'batch':[], 'epoch':[]}
+        self.accuracy = {'batch':[], 'epoch':[]}
+        self.val_loss = {'batch':[], 'epoch':[]}
+        self.val_acc = {'batch':[], 'epoch':[]}
+
+    def on_batch_end(self, batch, logs={}):
+        self.losses['batch'].append(logs.get('loss'))
+        self.accuracy['batch'].append(logs.get('acc'))
+        self.val_loss['batch'].append(logs.get('val_loss'))
+        self.val_acc['batch'].append(logs.get('val_acc'))
+
+    def on_epoch_end(self, batch, logs={}):
+        self.losses['epoch'].append(logs.get('loss'))
+        self.accuracy['epoch'].append(logs.get('acc'))
+        self.val_loss['epoch'].append(logs.get('val_loss'))
+        self.val_acc['epoch'].append(logs.get('val_acc'))
+
+    def loss_plot(self, loss_type):
+        iters = range(len(self.losses[loss_type]))
+        plt.figure()
+        # acc
+        plt.plot(iters, self.accuracy[loss_type], 'r', label='train acc')
+        # loss
+        plt.plot(iters, self.losses[loss_type], 'g', label='train loss')
+        if loss_type == 'epoch':
+            # val_acc
+            plt.plot(iters, self.val_acc[loss_type], 'b', label='val acc')
+            # val_loss
+            plt.plot(iters, self.val_loss[loss_type], 'k', label='val loss')
+        plt.grid(True)
+        plt.xlabel(loss_type)
+        plt.ylabel('acc-loss')
+        plt.legend(loc="upper right")
+        plt.show()
+        # plt.savefig("loss.png")
 
 def main():
     # limit gpu memory usage
@@ -113,7 +158,8 @@ def main():
         dm.add_data('train_data', train_path, True)
         dm.add_data('semi_data', semi_path, False)
     else:
-        raise Exception ('Implement your testing parser')
+        dm.add_data('test_data', test_path, False)
+
             
     # prepare tokenizer
     print ('get Tokenizer...')
@@ -163,17 +209,34 @@ def main():
                                      save_weights_only=True,
                                      monitor='val_acc',
                                      mode='max' )
-        history = model.fit(X, Y, 
+        #创建一个实例history
+        history = LossHistory()
+        hist = model.fit(X, Y, 
                             validation_data=(X_val, Y_val),
                             epochs=args.nb_epoch, 
                             batch_size=args.batch_size,
-                            callbacks=[checkpoint, earlystopping] )
+                            callbacks=[checkpoint, earlystopping,history] )
+        #绘制acc-loss曲线
+        history.loss_plot('epoch')
 #测试过程
     # testing
     elif args.action == 'test' :
-        raise Exception ('Implement your testing function')
+        id = dm.data['test_data'][1]
+        out = model.predict(dm.data['test_data'][0])
+        out = np.squeeze(out)
+        out[out<=0.5] = 0
+        out[out>0.5] = 1
+        out = out.astype(int)
+        print("pred shape:", np.array(out).shape)
+        print("id shape:", np.array(id).shape)
+        result = pd.concat([pd.DataFrame({'id':id}), pd.DataFrame({'sentiment': out})], axis=1)
+        wd = pd.DataFrame(result)
+        wd.to_csv("submission.csv", index=None)
+        newZip = zipfile.ZipFile('submission.zip', 'w')
+        newZip.write('submission.csv', compress_type=zipfile.ZIP_DEFLATED)
+        newZip.close()
 
-#半监督训练过程
+#半监督训练过
     # semi-supervised training
     elif args.action == 'semi':
         (X,Y),(X_val,Y_val) = dm.split_data('train_data', args.val_ratio)
@@ -196,12 +259,15 @@ def main():
             semi_X = np.concatenate((semi_X, X))
             semi_Y = np.concatenate((semi_Y, Y))
             print ('-- iteration %d  semi_data size: %d' %(i+1,len(semi_X)))
+            history = LossHistory()
+
             # train
-            history = model.fit(semi_X, semi_Y, 
+            hist = model.fit(semi_X, semi_Y, 
                                 validation_data=(X_val, Y_val),
                                 epochs=2, 
                                 batch_size=args.batch_size,
-                                callbacks=[checkpoint, earlystopping] )
+                                callbacks=[checkpoint, earlystopping,history] )
+            history.loss_plot('epoch')
 
             if os.path.exists(save_path):
                 print ('load model from %s' % save_path)

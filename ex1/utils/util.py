@@ -18,22 +18,24 @@ class DataManager:
     def add_data(self,name, data_path, with_label=True):
         print ('read data from %s...'%data_path)
         X, Y ,ID = [], [],[]
-        with open(data_path,'r') as f:
+        with open(data_path,'r',encoding='ISO-8859-1') as f:
             for line in f:
+                lines = line.strip().split('\t')
+                if lines[0] == 'id':
+                    continue                
                 if with_label:
-                    lines = line.strip().split('\t')
-                    if lines[0] == 'id':
-                        continue
                     item = re.findall(r'\b[a-z0-9\']+\b', lines[2], flags=re.IGNORECASE)
                     X.append(' '.join(item).lower())
                     Y.append(int(lines[1]))
                     ID.append(lines[0])
                 else:
-                    X.append(line)
+                    item = re.findall(r'\b[a-z0-9\']+\b', lines[1], flags=re.IGNORECASE)
+                    X.append(' '.join(item).lower())
+                    ID.append(lines[0])
         if with_label:
-            self.data[name] = [X,Y]
+            self.data[name] = [X,Y,ID]
         else:
-            self.data[name] = [X]
+            self.data[name] = [X,ID]
 
 ##创建词典
     # Build dictionary
@@ -46,7 +48,7 @@ class DataManager:
             texts = self.data[key][0]
             self.tokenizer.fit_on_texts(texts)
         self.index_words = dict(zip(self.tokenizer.word_index.values(),self.tokenizer.word_index.keys()))
-        print('====',self.index_words)
+
     # Save tokenizer to specified path
     def save_tokenizer(self, path):
         print ('save tokenizer to %s'%path)

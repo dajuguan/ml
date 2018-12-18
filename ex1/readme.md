@@ -1,8 +1,14 @@
 情感分析作业
 
-# 主要分为两个问价
+# 主要分为两个文件
 - hw4.py是主程序
-- utils是处理文字的程序
+- utils/util是处理文字的程序
+
+# 训练
+> python3 hw4.py semi semi 
+
+# 测试
+> python3 hw4.py semi test --load_model semi
 
 How to use
 supervised training (for example)
